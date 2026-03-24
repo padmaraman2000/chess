@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Simple Chess Game</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #f4f4f4;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      margin: 0;
+    }
+    .container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+    }
+    .board {
+      display: grid;
+      grid-template-columns: repeat(8, 50px);
+      border: 3px solid #333;
+      border-radius: 4px;
+      box-shadow: 0 6px 12px rgba(0,0,0,0.2);
+    }
+    .square {
+      width: 50px;
+      height: 50px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      font-size: 30px;
+      cursor: pointer;
+      user-select: none;
+      box-sizing: border-box;
+    }
+    .white {
+      background: #f0d9b5;
+    }
+    .black {
+      background: #b58863;
+    }
+    .highlight {
+      background: #acd157 !important;
+    }
+    .valid {
+      position: relative;
+    }
+    .valid::after {
+      content: "";
+      position: absolute;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: rgba(0,0,0,0.2);
+    }
+    .status {
+      padding: 10px 16px;
+      background: #fff;
+      border-radius: 6px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+      font-size: 15px;
+    }
+    .turn {
+      font-weight: 600;
+      color: #007acc;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="status">
+      Turn: <span class="turn" id="turn">White</span>
+    </div>
+    <div class="board" id="board"></div>
+  </div>
+
+  <script>
+    const board = document.getElementById("board");
+    const turnDisplay = document.getElementById("turn");
+
+    // Piece Unicode icons (black pieces end with "1")
+    const PIECES = {
+      wPawn: "♙",   bPawn: "♟",
+      wRook: "♖",   bRook: "♜",
+      wKnight: "♘", bKnight: "♞",
+      wBishop: "♗", bBishop: "♝",
+      wQueen: "♕",  bQueen: "♛",
+      wKing: "♔",   bKing: "♚",
+    };
+
+    // Initial FEN‑style layout (8 rows, 8 columns)
+    let layout = [
+      ["bRook", "bKnight", "bBishop", "bQueen", "bKing", "bBishop", "bKnight", "bRook"],
+      ["bPawn", "bPawn", "bPawn", "bPawn", "bPawn", "bPawn", "bPawn", "bPawn"],
+      ["", "", "", "", "", "", "", ""],
+      ["", "", "", "", "", "", "", ""],
+      ["", "", "", "", "", "", "", ""],
+      ["", "", "", "", "", "", "", ""],
+      ["wPawn", "wPawn", "wPawn", "wPawn", "wPawn", "wPawn", "wPawn", "wPawn"],
+      ["wRook", "wKnight", "wBishop", "wQueen", "wKing", "wBishop", "wKnight", "wRook"],
+    ];
+
+    let currentPlayer = "white";
+    let selectedSquare = null;
+    let validMoves = [];
+
+    // Map file,rank -> index (0…63)
+    function toIndex(row, col) {
+      return row * 8 + col;
+    }
+    function fromIndex(idx) {
+      return { row: Math.floor(idx / 8), col: idx % 8 };
+    }
+
+    // Draw the board
+    function renderBoard() {
+      board.innerHTML = "";
+      for (let row = 0; row < 8; row++) {
+        for (let col = 0; col < 8; col++) {
+          const idx = toIndex(row, col);
+          const piece = layout[row][col];
+          const square = document.createElement("div");
+          square.className = "square " + ((row + col) % 2 === 0 ? "white" : "black");
+          square.dataset.row = row;
+          square.dataset.col = col;
+
+          const pieceEl = document.createElement("span");
+          pieceEl.className = "piece";
+          if (piece) {
+            const isWhite = piece.startsWith("w");
+            pieceEl.textContent = PIECES[piece];
+            pieceEl.dataset.piece = piece;
+          }
+          square.append(pieceEl);
+
+          square.addEventListener("click", () => handleSquareClick(square, row, col, idx));
+          board.append(square);
+        }
+      }
+
+      // Re‑highlight selected and valid moves
+      refreshHighlights();
+    }
+
+    function refreshHighlights() {
+      const squares = board.querySelectorAll(".square");
+      squares.forEach((sq) => {
+        sq.classList.remove("highlight", "valid");
+      });
+
+      if (selectedSquare) {
+        const idx = parseInt(selectedSquare.dataset.row) * 8 + parseInt(selectedSquare.dataset.col);
+        const { row: sr, col: sc } = fromIndex(idx);
+        const piece = layout[sr][sc];
+        if (piece && piece.startsWith(currentPlayer === "white" ? "w" : "b")) {
+          selectedSquare.classList.add("highlight");
+        } else {
+          selectedSquare = null;
+        }
+      }
+
+      for (const move of validMoves) {
+        const el = board.querySelector(`[data-row="${move.toRow}"][data-col="${move.toCol}"]`);
+        if (el) el.classList.add("valid");
+      }
+    }
+
+    function handleSquareClick(square, row, col, idx) {
+      if (!selectedSquare) {
+        // No square selected yet
+        const piece = layout[row][col];
+        if (!piece) return;
+
+        const isWhite = piece.startsWith("w");
+        const color = isWhite ? "white" : "black";
+        if (color !== currentPlayer) return;
+
+        selectedSquare = square;
+        validMoves = getValidMoves(row, col, piece);
+        refreshHighlights();
+        return;
+      }
+
+      // Already selected a piece
+      const selRow = parseInt(selectedSquare.dataset.row);
+      const selCol = parseInt(selectedSquare.dataset.col);
+      const selPiece = layout[selRow][selCol];
+
+      if (selRow === row && selCol === col) {
+        // Clicked the same square → deselect
+        selectedSquare = null;
+        validMoves = [];
+        refreshHighlights();
+        return;
+      }
+
+      // Check if this is a valid move
+      const moveIdx = validMoves.findIndex((m) => m.toRow === row && m.toCol === col);
+      if (moveIdx < 0) {
+        // Try to select another piece of the same player
+        const piece = layout[row][col];
+        if (piece && piece.startsWith(currentPlayer === "white" ? "w" : "b")) {
+          selectedSquare = square;
+          validMoves = getValidMoves(row, col, piece);
+          refreshHighlights();
+        } else {
+          selectedSquare = null;
+          validMoves = [];
+          refreshHighlights();
+        }
+        return;
+      }
+
+      // Perform the move
+      layout[row][col] = selPiece;
+      layout[selRow][selCol] = "";
+
+      selectedSquare = null;
+      validMoves = [];
+      currentPlayer = currentPlayer === "white" ? "black" : "white";
+      turnDisplay.textContent = currentPlayer.charAt(0).toUpperCase() + currentPlayer.slice(1);
+
+      renderBoard();
+    }
+
+    function getValidMoves(row, col, piece) {
+      const moves = [];
+      const isWhite = piece.startsWith("w");
+      const color = isWhite ? "white" : "black";
+
+      const addIfValid = (r, c) => {
+        if (r < 0 || r > 7 || c < 0 || c > 7) return false;
+        const target = layout[r][c];
+        if (!target) {
+          moves.push({ fromRow: row, fromCol: col, toRow: r, toCol: c });
+          return true;
+        }
+        const isTargetWhite = target.startsWith("w");
+        const targetColor = isTargetWhite ? "white" : "black";
+        if (targetColor !== color) {
+          moves.push({ fromRow: row, fromCol: col, toRow: r, toCol: c });
+        }
+        return false;
+      };
+
+      const addRay = (dr, dc) => {
+        let r = row + dr;
+        let c = col + dc;
+        while (r >= 0 && r <= 7 && c >= 0 && c <= 7) {
+          const target = layout[r][c];
+          if (!target) {
+            moves.push({ fromRow: row, fromCol: col, toRow: r, toCol: c });
+          } else {
+            const isTargetWhite = target.startsWith("w");
+            const targetColor = isTargetWhite ? "white" : "black";
+            if (targetColor !== color) {
+              moves.push({ fromRow: row, fromCol: col, toRow: r, toCol: c });
+            }
+            break;
+          }
+          r += dr;
+          c += dc;
+        }
+      };
+
+      switch (piece) {
+        case "wPawn":
+          if (row > 0 && !layout[row - 1][col]) {
+            addIfValid(row - 1, col);
+          }
+          if (row === 6 && !layout[5][col] && !layout[4][col]) {
+            addIfValid(4, col);
+          }
+          if (row > 0 && col > 0 && layout[row - 1][col - 1] && layout[row - 1][col - 1].startsWith("b")) {
+            addIfValid(row - 1, col - 1);
+          }
+          if (row > 0 && col < 7 && layout[row - 1][col + 1] && layout[row - 1][col + 1].startsWith("b")) {
+            addIfValid(row - 1, col + 1);
+          }
+          break;
+        case "bPawn":
+          if (row < 7 && !layout[row + 1][col]) {
+            addIfValid(row + 1, col);
+          }
+          if (row === 1 && !layout[2][col] && !layout[3][col]) {
+            addIfValid(3, col);
+          }
+          if (row < 7 && col > 0 && layout[row + 1][col - 1] && layout[row + 1][col - 1].startsWith("w")) {
+            addIfValid(row + 1, col - 1);
+          }
+          if (row < 7 && col < 7 && layout[row + 1][col + 1] && layout[row + 1][col + 1].startsWith("w")) {
+            addIfValid(row + 1, col + 1);
+          }
+          break;
+
+        case "wKnight":
+        case "bKnight":
+          for (const [dr, dc] of [[-2, -1], [-2, 1], [-1, -2], [-1, 2], [1, -2], [1, 2], [2, -1], [2, 1]]) {
+            addIfValid(row + dr, col + dc);
+          }
+          break;
+
+        case "wBishop":
+        case "bBishop":
+          addRay(-1, -1);
+          addRay(-1, 1);
+          addRay(1, -1);
+          addRay(1, 1);
+          break;
+
+        case "wRook":
+        case "bRook":
+          addRay(-1, 0);
+          addRay(1, 0);
+          addRay(0, -1);
+          addRay(0, 1);
+          break;
+
+        case "wQueen":
+        case "bQueen":
+          addRay(-1, -1);
+          addRay(-1, 1);
+          addRay(1, -1);
+          addRay(1, 1);
+          addRay(-1, 0);
+          addRay(1, 0);
+          addRay(0, -1);
+          addRay(0, 1);
+          break;
+
+        case "wKing":
+        case "bKing":
+          for (let dr = -1; dr <= 1; dr++) {
+            for (let dc = -1; dc <= 1; dc++) {
+              if (dr === 0 && dc === 0) continue;
+              addIfValid(row + dr, col + dc);
+            }
+          }
+          break;
+      }
+
+      return moves;
+    }
+
+    // Initial setup
+    renderBoard();
+  </script>
+</body>
+</html>
+
