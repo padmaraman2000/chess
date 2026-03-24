@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Chess Game (Correct Check/Checkmate)</title>
+  <title>Chess Game (Correct Rules)</title>
   <style>
     body {
       font-family: system-ui, sans-serif;
@@ -101,16 +101,16 @@
       ["wRook", "wKnight", "wBishop", "wQueen", "wKing", "wBishop", "wKnight", "wRook"]
     ];
 
-    let currentPlayer = "white"; // white/black
+    let currentPlayer = "white"; // "white" | "black"
     let selectedSquare = null;
     let validMoves = [];
     let isGameOver = false;
 
-    // Index helpers
+    // Helper: index ↔ row,col
     function toIndex(row, col) { return row * 8 + col; }
     function fromIndex(idx) { return { row: Math.floor(idx / 8), col: idx % 8 }; }
 
-    // Get all attack moves (ignoring own‑color) for a square
+    // Get all possible attack moves (ignoring own‑color) for a piece
     function getAttacks(row, col, piece) {
       const moves = [];
       const isWhite = piece.startsWith("w");
@@ -157,7 +157,6 @@
         case "wPawn":
         case "bPawn": {
           const direction = piece === "wPawn" ? -1 : 1;
-          const r2 = row + direction * 2;
           if (row + direction >= 0 && row + direction <= 7) {
             if (!layout[row + direction][col]) {
               addIfValid(row + direction, col);
@@ -185,7 +184,7 @@
 
         case "wKnight":
         case "bKnight":
-          for (const [dr, dc] of [[-2, -1], [-2, 1], [-1, -2], [-1, 2], [1, -2], [1, 2], [2, -1], [2, 1]]) {
+          for (const [dr, dc] of [[-2,-1], [-2,1], [-1,-2], [-1,2], [1,-2], [1,2], [2,-1], [2,1]]) {
             addIfValid(row + dr, col + dc);
           }
           break;
@@ -232,7 +231,7 @@
       return moves;
     }
 
-    // Is the king of `kingColor` currently in check?
+    // Is the king of `kingColor` in check?
     function inCheck(kingColor) {
       const kingPiece = kingColor === "white" ? "wKing" : "bKing";
       let kingRow = -1, kingCol = -1;
@@ -261,10 +260,10 @@
       return false;
     }
 
-    // Compute **all legal moves** for a given piece, obeying check rules
+    // Get all legal moves **obeying check rules** for a piece
     function getLegalMoves(row, col, piece) {
       const pseudoMoves = getAttacks(row, col, piece);
-      const moves = [];
+      const legalMoves = [];
       const isWhite = piece.startsWith("w");
       const color = isWhite ? "white" : "black";
 
@@ -273,15 +272,14 @@
 
         // Simulate move
         const tempLayout = layout.map(r => [...r]);
-        const captured = tempLayout[toRow][toCol];
         tempLayout[toRow][toCol] = tempLayout[row][col];
         tempLayout[row][col] = "";
 
         // Check if king is still in check after this move
         const newKingColor = color;
         const isStillInCheck = (() => {
+          const kingPiece = newKingColor === "white" ? "wKing" : "bKing";
           let kingRow = -1, kingCol = -1;
-          const kingPiece = color === "white" ? "wKing" : "bKing";
           for (let r = 0; r < 8; r++) {
             for (let c = 0; c < 8; c++) {
               if (tempLayout[r][c] === kingPiece) { kingRow = r; kingCol = c; }
@@ -294,7 +292,7 @@
               if (!p) continue;
               const isPWhite = p.startsWith("w");
               const pColor = isPWhite ? "white" : "black";
-              if (pColor === color) continue;
+              if (pColor === newKingColor) continue;
 
               const attacks = getAttacks(r, c, p);
               if (attacks.some(a => a.toRow === kingRow && a.toCol === kingCol)) {
@@ -306,14 +304,14 @@
         })();
 
         if (!isStillInCheck) {
-          moves.push(move);
+          legalMoves.push(move);
         }
       }
 
-      return moves;
+      return legalMoves;
     }
 
-    // Get all legal moves **for current player** + king position
+    // Get all legal moves for `color` + king position
     function getValidMovesForColor(color) {
       const moves = [];
       const kingPiece = color === "white" ? "wKing" : "bKing";
@@ -343,7 +341,7 @@
       return inCheck(currentPlayer) && moves.length === 0;
     }
 
-    // Render UI
+    // Render board + status
     function renderBoard() {
       if (isGameOver) return;
 
@@ -465,4 +463,14 @@
 
       const nextPlayer = currentPlayer === "white" ? "black" : "white";
       if (isCheckmate()) {
-       
+        isGameOver = true;
+        const winner = currentPlayer === "white" ? "Black" : "White";
+        statusText.classList.add("game-over");
+        statusText.textContent = `${winner} wins by checkmate!`;
+      } else {
+        currentPlayer = nextPlayer;
+        renderBoard();
+      }
+    }
+
+    // Start
