@@ -2,10 +2,10 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Simple Chess Game</title>
+  <title>Chess Game (with Check/Checkmate)</title>
   <style>
     body {
-      font-family: system-ui, -apple-system, sans-serif;
+      font-family: system-ui, sans-serif;
       background: #f4f4f4;
       display: flex;
       justify-content: center;
@@ -17,7 +17,7 @@
       display: flex;
       flex-direction: column;
       align-items: center;
-      gap: 10px;
+      gap: 12px;
     }
     .board {
       display: grid;
@@ -37,15 +37,9 @@
       user-select: none;
       box-sizing: border-box;
     }
-    .white {
-      background: #f0d9b5;
-    }
-    .black {
-      background: #b58863;
-    }
-    .highlight {
-      background: #acd157 !important;
-    }
+    .white { background: #f0d9b5; }
+    .black { background: #b58863; }
+    .highlight { background: #acd157 !important; }
     .valid {
       position: relative;
     }
@@ -63,26 +57,31 @@
       border-radius: 6px;
       box-shadow: 0 2px 6px rgba(0,0,0,0.1);
       font-size: 15px;
+      text-align: center;
     }
     .turn {
       font-weight: 600;
       color: #007acc;
+    }
+    .game-over {
+      color: #d00;
+      font-weight: 600;
     }
   </style>
 </head>
 <body>
   <div class="container">
     <div class="status">
-      Turn: <span class="turn" id="turn">White</span>
+      Status: 
+      <span class="turn" id="statusText">White to move</span>
     </div>
     <div class="board" id="board"></div>
   </div>
 
   <script>
     const board = document.getElementById("board");
-    const turnDisplay = document.getElementById("turn");
+    const statusText = document.getElementById("statusText");
 
-    // Piece Unicode icons (black pieces end with "1")
     const PIECES = {
       wPawn: "♙",   bPawn: "♟",
       wRook: "♖",   bRook: "♜",
@@ -92,7 +91,6 @@
       wKing: "♔",   bKing: "♚",
     };
 
-    // Initial FEN‑style layout (8 rows, 8 columns)
     let layout = [
       ["bRook", "bKnight", "bBishop", "bQueen", "bKing", "bBishop", "bKnight", "bRook"],
       ["bPawn", "bPawn", "bPawn", "bPawn", "bPawn", "bPawn", "bPawn", "bPawn"],
@@ -101,142 +99,57 @@
       ["", "", "", "", "", "", "", ""],
       ["", "", "", "", "", "", "", ""],
       ["wPawn", "wPawn", "wPawn", "wPawn", "wPawn", "wPawn", "wPawn", "wPawn"],
-      ["wRook", "wKnight", "wBishop", "wQueen", "wKing", "wBishop", "wKnight", "wRook"],
+      ["wRook", "wKnight", "wBishop", "wQueen", "wKing", "wBishop", "wKnight", "wRook"]
     ];
 
     let currentPlayer = "white";
     let selectedSquare = null;
     let validMoves = [];
+    let isGameOver = false;
 
-    // Map file,rank -> index (0…63)
-    function toIndex(row, col) {
-      return row * 8 + col;
-    }
-    function fromIndex(idx) {
-      return { row: Math.floor(idx / 8), col: idx % 8 };
-    }
+    function toIndex(row, col) { return row * 8 + col; }
+    function fromIndex(idx) { return { row: Math.floor(idx / 8), col: idx % 8 }; }
 
-    // Draw the board
-    function renderBoard() {
-      board.innerHTML = "";
-      for (let row = 0; row < 8; row++) {
-        for (let col = 0; col < 8; col++) {
-          const idx = toIndex(row, col);
-          const piece = layout[row][col];
-          const square = document.createElement("div");
-          square.className = "square " + ((row + col) % 2 === 0 ? "white" : "black");
-          square.dataset.row = row;
-          square.dataset.col = col;
+    function inCheck(kingColor) {
+      const kingPiece = kingColor === "white" ? "wKing" : "bKing";
+      let kingRow = -1, kingCol = -1;
+      for (let r = 0; r < 8; r++) {
+        for (let c = 0; c < 8; c++) {
+          if (layout[r][c] === kingPiece) { kingRow = r; kingCol = c; }
+        }
+      }
+      if (kingRow === -1) return false;
 
-          const pieceEl = document.createElement("span");
-          pieceEl.className = "piece";
-          if (piece) {
-            const isWhite = piece.startsWith("w");
-            pieceEl.textContent = PIECES[piece];
-            pieceEl.dataset.piece = piece;
+      const attackerColor = kingColor === "white" ? "black" : "white";
+      for (let r = 0; r < 8; r++) {
+        for (let c = 0; c < 8; c++) {
+          const piece = layout[r][c];
+          if (!piece) continue;
+          const isWhite = piece.startsWith("w");
+          const color = isWhite ? "white" : "black";
+          if (color !== attackerColor) continue;
+
+          const attacks = getAttacks(r, c, piece);
+          if (attacks.some(move => move.toRow === kingRow && move.toCol === kingCol)) {
+            return true;
           }
-          square.append(pieceEl);
-
-          square.addEventListener("click", () => handleSquareClick(square, row, col, idx));
-          board.append(square);
         }
       }
-
-      // Re‑highlight selected and valid moves
-      refreshHighlights();
+      return false;
     }
 
-    function refreshHighlights() {
-      const squares = board.querySelectorAll(".square");
-      squares.forEach((sq) => {
-        sq.classList.remove("highlight", "valid");
-      });
-
-      if (selectedSquare) {
-        const idx = parseInt(selectedSquare.dataset.row) * 8 + parseInt(selectedSquare.dataset.col);
-        const { row: sr, col: sc } = fromIndex(idx);
-        const piece = layout[sr][sc];
-        if (piece && piece.startsWith(currentPlayer === "white" ? "w" : "b")) {
-          selectedSquare.classList.add("highlight");
-        } else {
-          selectedSquare = null;
-        }
-      }
-
-      for (const move of validMoves) {
-        const el = board.querySelector(`[data-row="${move.toRow}"][data-col="${move.toCol}"]`);
-        if (el) el.classList.add("valid");
-      }
-    }
-
-    function handleSquareClick(square, row, col, idx) {
-      if (!selectedSquare) {
-        // No square selected yet
-        const piece = layout[row][col];
-        if (!piece) return;
-
-        const isWhite = piece.startsWith("w");
-        const color = isWhite ? "white" : "black";
-        if (color !== currentPlayer) return;
-
-        selectedSquare = square;
-        validMoves = getValidMoves(row, col, piece);
-        refreshHighlights();
-        return;
-      }
-
-      // Already selected a piece
-      const selRow = parseInt(selectedSquare.dataset.row);
-      const selCol = parseInt(selectedSquare.dataset.col);
-      const selPiece = layout[selRow][selCol];
-
-      if (selRow === row && selCol === col) {
-        // Clicked the same square → deselect
-        selectedSquare = null;
-        validMoves = [];
-        refreshHighlights();
-        return;
-      }
-
-      // Check if this is a valid move
-      const moveIdx = validMoves.findIndex((m) => m.toRow === row && m.toCol === col);
-      if (moveIdx < 0) {
-        // Try to select another piece of the same player
-        const piece = layout[row][col];
-        if (piece && piece.startsWith(currentPlayer === "white" ? "w" : "b")) {
-          selectedSquare = square;
-          validMoves = getValidMoves(row, col, piece);
-          refreshHighlights();
-        } else {
-          selectedSquare = null;
-          validMoves = [];
-          refreshHighlights();
-        }
-        return;
-      }
-
-      // Perform the move
-      layout[row][col] = selPiece;
-      layout[selRow][selCol] = "";
-
-      selectedSquare = null;
-      validMoves = [];
-      currentPlayer = currentPlayer === "white" ? "black" : "white";
-      turnDisplay.textContent = currentPlayer.charAt(0).toUpperCase() + currentPlayer.slice(1);
-
-      renderBoard();
-    }
-
-    function getValidMoves(row, col, piece) {
+    function getAttacks(row, col, piece) {
       const moves = [];
       const isWhite = piece.startsWith("w");
       const color = isWhite ? "white" : "black";
 
-      const addIfValid = (r, c) => {
+      const addIfValid = (r, c, capturesOnly = false) => {
         if (r < 0 || r > 7 || c < 0 || c > 7) return false;
         const target = layout[r][c];
         if (!target) {
-          moves.push({ fromRow: row, fromCol: col, toRow: r, toCol: c });
+          if (!capturesOnly) {
+            moves.push({ fromRow: row, fromCol: col, toRow: r, toCol: c });
+          }
           return true;
         }
         const isTargetWhite = target.startsWith("w");
@@ -269,33 +182,35 @@
 
       switch (piece) {
         case "wPawn":
-          if (row > 0 && !layout[row - 1][col]) {
-            addIfValid(row - 1, col);
-          }
-          if (row === 6 && !layout[5][col] && !layout[4][col]) {
-            addIfValid(4, col);
-          }
-          if (row > 0 && col > 0 && layout[row - 1][col - 1] && layout[row - 1][col - 1].startsWith("b")) {
-            addIfValid(row - 1, col - 1);
-          }
-          if (row > 0 && col < 7 && layout[row - 1][col + 1] && layout[row - 1][col + 1].startsWith("b")) {
-            addIfValid(row - 1, col + 1);
+        case "bPawn": {
+          const direction = piece === "wPawn" ? -1 : 1;
+          const r2 = row + direction * 2;
+          if (row + direction >= 0 && row + direction <= 7) {
+            if (!layout[row + direction][col]) {
+              addIfValid(row + direction, col);
+            }
+            if (piece === "wPawn" && row === 6 || piece === "bPawn" && row === 1) {
+              if (!layout[row + direction][col] && !layout[row + direction * 2][col]) {
+                addIfValid(row + direction * 2, col);
+              }
+            }
+            if (row + direction >= 0 && row + direction <= 7) {
+              if (col > 0 && layout[row + direction][col - 1]) {
+                const p = layout[row + direction][col - 1];
+                if ((piece === "wPawn" && p.startsWith("b")) || (piece === "bPawn" && p.startsWith("w"))) {
+                  addIfValid(row + direction, col - 1);
+                }
+              }
+              if (col < 7 && layout[row + direction][col + 1]) {
+                const p = layout[row + direction][col + 1];
+                if ((piece === "wPawn" && p.startsWith("b")) || (piece === "bPawn" && p.startsWith("w"))) {
+                  addIfValid(row + direction, col + 1);
+                }
+              }
+            }
           }
           break;
-        case "bPawn":
-          if (row < 7 && !layout[row + 1][col]) {
-            addIfValid(row + 1, col);
-          }
-          if (row === 1 && !layout[2][col] && !layout[3][col]) {
-            addIfValid(3, col);
-          }
-          if (row < 7 && col > 0 && layout[row + 1][col - 1] && layout[row + 1][col - 1].startsWith("w")) {
-            addIfValid(row + 1, col - 1);
-          }
-          if (row < 7 && col < 7 && layout[row + 1][col + 1] && layout[row + 1][col + 1].startsWith("w")) {
-            addIfValid(row + 1, col + 1);
-          }
-          break;
+        }
 
         case "wKnight":
         case "bKnight":
@@ -346,9 +261,219 @@
       return moves;
     }
 
-    // Initial setup
-    renderBoard();
-  </script>
-</body>
-</html>
+    function getLegalMoves(row, col, piece) {
+      const pseudoMoves = getAttacks(row, col, piece);
+      const moves = [];
+      const isWhite = piece.startsWith("w");
+      const color = isWhite ? "white" : "black";
 
+      for (const move of pseudoMoves) {
+        const { toRow, toCol } = move;
+
+        // Simulate move
+        const tempLayout = layout.map(r => [...r]);
+        const captured = tempLayout[toRow][toCol];
+        tempLayout[toRow][toCol] = tempLayout[row][col];
+        tempLayout[row][col] = "";
+
+        // Check if king is still in check after this move
+        let newKingColor = color;
+        if (piece === "wKing" || piece === "bKing") {
+          newKingColor = color;
+        }
+
+        const isStillInCheck = (() => {
+          let kingRow = -1, kingCol = -1;
+          const kingPiece = color === "white" ? "wKing" : "bKing";
+          for (let r = 0; r < 8; r++) {
+            for (let c = 0; c < 8; c++) {
+              if (tempLayout[r][c] === kingPiece) { kingRow = r; kingCol = c; }
+            }
+          }
+
+          for (let r = 0; r < 8; r++) {
+            for (let c = 0; c < 8; c++) {
+              const p = tempLayout[r][c];
+              if (!p) continue;
+              const isPWhite = p.startsWith("w");
+              const pColor = isPWhite ? "white" : "black";
+              if (pColor === color) continue;
+
+              const attacks = getAttacks(r, c, p);
+              if (attacks.some(a => a.toRow === kingRow && a.toCol === kingCol)) {
+                return true;
+              }
+            }
+          }
+          return false;
+        })();
+
+        if (!isStillInCheck) {
+          moves.push(move);
+        }
+      }
+
+      return moves;
+    }
+
+    function getValidMovesForColor(color) {
+      const moves = [];
+      const kingPiece = color === "white" ? "wKing" : "bKing";
+      let kingRow = -1, kingCol = -1;
+
+      for (let r = 0; r < 8; r++) {
+        for (let c = 0; c < 8; c++) {
+          const piece = layout[r][c];
+          if (!piece) continue;
+          const isWhite = piece.startsWith("w");
+          const pColor = isWhite ? "white" : "black";
+          if (pColor !== color) continue;
+
+          const legalMoves = getLegalMoves(r, c, piece);
+          moves.push(...legalMoves);
+
+          if (piece === kingPiece) { kingRow = r; kingCol = c; }
+        }
+      }
+
+      return { moves, kingRow, kingCol };
+    }
+
+    function isCheckmate() {
+      const { moves } = getValidMovesForColor(currentPlayer);
+      if (moves.length === 0 && inCheck(currentPlayer)) {
+        return true;
+      }
+      return false;
+    }
+
+    function renderBoard() {
+      if (isGameOver) return;
+
+      board.innerHTML = "";
+      for (let row = 0; row < 8; row++) {
+        for (let col = 0; col < 8; col++) {
+          const idx = toIndex(row, col);
+          const piece = layout[row][col];
+          const square = document.createElement("div");
+          square.className = "square " + ((row + col) % 2 === 0 ? "white" : "black");
+          square.dataset.row = row;
+          square.dataset.col = col;
+
+          const pieceEl = document.createElement("span");
+          pieceEl.className = "piece";
+          if (piece) {
+            const isWhite = piece.startsWith("w");
+            pieceEl.textContent = PIECES[piece];
+            pieceEl.dataset.piece = piece;
+          }
+          square.append(pieceEl);
+
+          square.addEventListener("click", () => handleSquareClick(square, row, col, idx));
+          board.append(square);
+        }
+      }
+
+      if (inCheck(currentPlayer)) {
+        statusText.classList.add("game-over");
+        statusText.textContent = `${currentPlayer.charAt(0).toUpperCase() + currentPlayer.slice(1)} is in check!`;
+      } else {
+        statusText.classList.remove("game-over");
+        statusText.textContent = `${currentPlayer.charAt(0).toUpperCase() + currentPlayer.slice(1)} to move`;
+      }
+
+      refreshHighlights();
+    }
+
+    function refreshHighlights() {
+      const squares = board.querySelectorAll(".square");
+      squares.forEach(sq => sq.classList.remove("highlight", "valid"));
+
+      if (selectedSquare) {
+        const idx = parseInt(selectedSquare.dataset.row) * 8 + parseInt(selectedSquare.dataset.col);
+        const { row: sr, col: sc } = fromIndex(idx);
+        const piece = layout[sr][sc];
+        if (!piece) {
+          selectedSquare = null;
+          return;
+        }
+        const isWhite = piece.startsWith("w");
+        const color = isWhite ? "white" : "black";
+        if (color !== currentPlayer) {
+          selectedSquare = null;
+          return;
+        }
+        selectedSquare.classList.add("highlight");
+      }
+
+      for (const move of validMoves) {
+        const el = board.querySelector(`[data-row="${move.toRow}"][data-col="${move.toCol}"]`);
+        if (el) el.classList.add("valid");
+      }
+    }
+
+    function handleSquareClick(square, row, col, idx) {
+      if (isGameOver) return;
+
+      if (!selectedSquare) {
+        const piece = layout[row][col];
+        if (!piece) return;
+
+        const isWhite = piece.startsWith("w");
+        const color = isWhite ? "white" : "black";
+        if (color !== currentPlayer) return;
+
+        selectedSquare = square;
+        validMoves = getLegalMoves(row, col, piece);
+        refreshHighlights();
+        return;
+      }
+
+      const selRow = parseInt(selectedSquare.dataset.row);
+      const selCol = parseInt(selectedSquare.dataset.col);
+      const selPiece = layout[selRow][selCol];
+
+      if (selRow === row && selCol === col) {
+        selectedSquare = null;
+        validMoves = [];
+        refreshHighlights();
+        return;
+      }
+
+      const moveIdx = validMoves.findIndex(m => m.toRow === row && m.toCol === col);
+      if (moveIdx < 0) {
+        const piece = layout[row][col];
+        if (piece && piece.startsWith(currentPlayer === "white" ? "w" : "b")) {
+          selectedSquare = square;
+          validMoves = getLegalMoves(row, col, piece);
+          refreshHighlights();
+        } else {
+          selectedSquare = null;
+          validMoves = [];
+          refreshHighlights();
+        }
+        return;
+      }
+
+      // Perform move
+      const captured = layout[row][col];
+      layout[row][col] = selPiece;
+      layout[selRow][selCol] = "";
+
+      selectedSquare = null;
+      validMoves = [];
+
+      // Check for checkmate
+      const nextPlayer = currentPlayer === "white" ? "black" : "white";
+      if (isCheckmate()) {
+        isGameOver = true;
+        statusText.classList.add("game-over");
+        statusText.textContent = `${nextPlayer.charAt(0).toUpperCase() + nextPlayer.slice(1)} wins by checkmate!`;
+      } else {
+        currentPlayer = nextPlayer;
+        renderBoard();
+      }
+    }
+
+    renderBoard();
+  </
